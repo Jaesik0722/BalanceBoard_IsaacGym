@@ -6,9 +6,9 @@ This repository provides custom IsaacGymEnvs tasks for training and evaluating a
 
 ## Demo Video
 
-[![Balance Board Demo](https://img.youtube.com/vi/pwDBEvZQJcA/0.jpg)](https://www.youtube.com/watch?v=pwDBEvZQJcA)
+[![Balance Board Demo](https://img.youtube.com/vi/-xCmdSmCYeY/0.jpg)](https://youtu.be/-xCmdSmCYeY)
 
-Direct link: [Watch the demo on YouTube](https://www.youtube.com/watch?v=pwDBEvZQJcA)
+Direct link: [Watch the demo on YouTube](https://youtu.be/-xCmdSmCYeY)
 
 ## Overview
 
