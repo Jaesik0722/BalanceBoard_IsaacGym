@@ -7,7 +7,7 @@ physics_engine: ${..physics_engine}
 env: 
   numEnvs: ${resolve_default:4096,${...num_envs}}
   envSpacing: 1.0
-  episodeLength: 1000
+  episodeLength: 6000  # 60s at sim dt=0.01, matching the eval protocol's 60s window
   touchGroundTime: 200
   boardResetAngle: 15
   enableDebugVis: False
@@ -26,12 +26,29 @@ env:
   enableCameraSensors: False
 
   viewer:
-    pose: [2.0, -1.0, 1.0]
+    pose: [2.0, 0.0, 1.5]
     target: [0.0, 0.0, 0.0]
   
   numRewards: 7
   rewardWeight: -5
   offsetRange: [-0.005, 0.005]
+  fullStateObservation: false
+  # Initial board tilt at spawn, in degrees (0 = neutral). Used for the
+  # initial-board-angle robustness sweep in place of external disturbance forces.
+  boardInitRollDeg: 0.0
+  boardInitPitchDeg: 0.0
+
+# Evaluation-only knobs. All-zero / inactive by default, so training behaviour
+# is unchanged; the E1 sensor sweep overrides these from the command line.
+eval:
+  sensorModelActive: false   # true keeps the zero-noise baseline on the same code path
+  sensorNoise:
+    attitudeStd: 0.0         # rad,   IMU attitude
+    gyroStd: 0.0             # rad/s, body-frame gyro
+    encoderStd: 0.0          # rad,   joint encoder
+    encoderResolution: 0.0   # rad,   0 disables quantization
+    biasPerEpisode: true
+  observationDelaySteps: 0   # 1 step = 10 ms at dt=0.01
 
 sim:
   dt: 0.01   # 1/60 s

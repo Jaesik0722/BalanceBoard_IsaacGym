@@ -1,0 +1,32 @@
+{
+  "source": "PID_full policies, 5 seeds, nominal condition",
+  "samples": 98934,
+  "action": [
+    -0.064864,
+    -0.071508,
+    -0.243641,
+    -0.361627,
+    -0.2153,
+    -0.895786,
+    -0.032252,
+    0.073465,
+    0.626521,
+    -0.454212,
+    -0.276451,
+    -0.010783
+  ],
+  "labelled": {
+    "kp_roll": -0.064864,
+    "kd_roll": -0.071508,
+    "kp_pitch": -0.243641,
+    "kd_pitch": -0.361627,
+    "w_leg_roll": -0.2153,
+    "w_leg_pitch": -0.895786,
+    "w_arm_roll_l": -0.032252,
+    "w_arm_pitch_l": 0.073465,
+    "w_arm_roll_r": 0.626521,
+    "w_arm_pitch_r": -0.454212,
+    "lpf_roll": -0.276451,
+    "lpf_pitch": -0.010783
+  }
+}

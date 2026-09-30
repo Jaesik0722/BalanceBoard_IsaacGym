@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+runs/*/nn/*.pth
+results/e1/
+results/e2/
+results/stochastic/
+results/coordination/
+*.npz

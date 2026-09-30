@@ -3,6 +3,7 @@ import os
 import torch
 import math
 import random
+from typing import List
 
 from isaacgym import gymtorch
 from isaacgym import gymapi
@@ -14,6 +15,9 @@ from isaacgymenvs.tasks.base.vec_task import VecTask
 import enum
 from isaacgymenvs.utils.pid import *
 from isaacgymenvs.utils.filter import *
+from isaacgymenvs.utils.sensor_model import SensorModel
+from isaacgymenvs.utils import physics_scale
+from isaacgymenvs.utils.foot_reference import FootReference
 
 START_NUM = 0
 LEG_LENGTH = 190.0
@@ -51,10 +55,10 @@ class BalanceBoardPID(VecTask):
         self.board_reset_angle = self.cfg["env"]["boardResetAngle"]
         self._offset_range = self.cfg["env"]["offsetRange"]
 
-        # Ideal Observations: 80
-        # Real World Possible Observations: 43
-        self.cfg["env"]["numObservations"] = 43 
-        
+        self._physics_scales = physics_scale.get_scales(self.cfg)
+        self._full_state = bool(self.cfg["env"].get("fullStateObservation", False))
+        self.cfg["env"]["numObservations"] = 80 if self._full_state else 43
+
         self.cfg["env"]["numActions"] = 12
 
         self.dt = self.cfg["sim"]["dt"]
@@ -104,6 +108,17 @@ class BalanceBoardPID(VecTask):
         
         self.count = 0
 
+        # Evaluation-only; a pass-through unless cfg["eval"] turns it on.
+        self.sensor_model = SensorModel(
+            self.num_envs, self.device, self.cfg.get("eval", {}), self._full_state
+        )
+        if self.sensor_model.enabled:
+            print(f"[BalanceBoardPID] {self.sensor_model.describe()}")
+
+        self.foot_reference = FootReference(self.num_envs, self.device, self.cfg.get("eval", {}))
+        if self.foot_reference.enabled:
+            print(f"[BalanceBoardPID]: foot displacement measured from each env's own spawn position")
+
         self._create_view()
         self._generate_indexes()
         self._allocate_tensors()
@@ -149,14 +164,15 @@ class BalanceBoardPID(VecTask):
         self.robinion2s_pose = gymapi.Transform()
         self.robinion2s_pose.p.y = 0.0245
         self.robinion2s_pose.p.x = 0.02
-        self.robinion2s_pose.p.z = 0.612
+        _roller_dz = physics_scale.roller_height_offset(self.cfg)
+        self.robinion2s_pose.p.z = 0.612 + _roller_dz
         self.robinion2s_pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
         
         self.robinion2s_rigid_body_dict = self.gym.get_asset_rigid_body_dict(self.robinion2s_asset)        
 
         # Create Board asset
         board_asset_root = os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../assets")
-        board_asset_path = "urdf/board.urdf"
+        board_asset_path = physics_scale.board_asset_path(self.cfg)
 
         board_asset_options = gymapi.AssetOptions()
         board_asset_options.fix_base_link = False
@@ -165,9 +181,8 @@ class BalanceBoardPID(VecTask):
         self.board_asset = self.gym.load_asset(self.sim, board_asset_root, board_asset_path, board_asset_options)
 
         self.board_pose = gymapi.Transform()
-        self.board_pose.p.z = 0.064
-        x, y, z, w = self.quat_from_euler_deg(roll_deg=0.0, pitch_deg=0.0)
-        self.board_pose.r = gymapi.Quat(x, y, z, w)
+        self.board_pose.p.z = 0.064 + _roller_dz
+        self.board_pose.r = gymapi.Quat(0.0, 0.0, 0.0, 1.0)
         
         self.board_rigid_body_dict = self.gym.get_asset_rigid_body_dict(self.board_asset)
 
@@ -193,13 +208,25 @@ class BalanceBoardPID(VecTask):
 
             props = self.gym.get_actor_dof_properties(env_ptr, robinion2s_handle)
             props["driveMode"] = gymapi.DOF_MODE_POS
-            props["stiffness"] = 80.0
-            props["damping"] = 2.0
+            props["stiffness"] = 80.0 * self._physics_scales["joint_stiffness"]
+            props["damping"] = 2.0 * self._physics_scales["joint_damping"]
             self.gym.set_actor_dof_properties(env_ptr, robinion2s_handle, props)
             self.num_dofs = self.gym.get_actor_dof_count(env_ptr, robinion2s_handle)
 
+            # Measurement only, enabled solely for the coordination analysis: this reports
+            # the torque the position servo actually applied, which is what a postural
+            # strategy must be defined on. Joint angle says how far a joint moved, not how
+            # much it contributed to keeping the robot up.
+            if self.cfg.get("eval", {}).get("logJointTorque", False):
+                self.gym.enable_actor_dof_force_sensors(env_ptr, robinion2s_handle)
+
             # Create Balance board
             board_handle = self.gym.create_actor(env_ptr, self.board_asset, self.board_pose, "board", 0, 0)
+
+            physics_scale.scale_actor_mass(
+                self.gym, env_ptr, robinion2s_handle, self._physics_scales["robot_mass"])
+            physics_scale.scale_actor_mass(
+                self.gym, env_ptr, board_handle, self._physics_scales["board_mass"])
 
             robinion2s_handles.append(robinion2s_handle)
             board_handles.append(board_handle)
@@ -355,7 +382,7 @@ class BalanceBoardPID(VecTask):
         left_leg, right_leg, left_arm, right_arm = self.calculate_joint_position(filtered_pid_roll, filtered_pid_pitch, weights, env_ids)
 
         return left_leg, right_leg, left_arm, right_arm
-    
+
 
     def reset_idx(self, reset_env_ids):
         self.pid_roll.reset_pid(reset_env_ids)
@@ -374,8 +401,11 @@ class BalanceBoardPID(VecTask):
         self.dof_pos[reset_env_ids, :] = self.torch_initial_pos
         self.dof_vel[reset_env_ids, :] = 0.0
         
-        self.reset_positions[self.robinion2s_indexes[reset_env_ids],0] = self.robinion2s_pose.p.x + random.uniform(self._offset_range[0], self._offset_range[1])
-        self.reset_positions[self.robinion2s_indexes[reset_env_ids],1] = self.robinion2s_pose.p.y + random.uniform(self._offset_range[0], self._offset_range[1])
+        _n = len(reset_env_ids)
+        _lo, _hi = self._offset_range[0], self._offset_range[1]
+        _off = torch.rand((_n, 2), device=self.device) * (_hi - _lo) + _lo
+        self.reset_positions[self.robinion2s_indexes[reset_env_ids], 0] = self.robinion2s_pose.p.x + _off[:, 0]
+        self.reset_positions[self.robinion2s_indexes[reset_env_ids], 1] = self.robinion2s_pose.p.y + _off[:, 1]
         
         self.gym.set_dof_state_tensor_indexed(
             self.sim,
@@ -399,22 +429,37 @@ class BalanceBoardPID(VecTask):
         self.progress_buf[reset_env_ids] = 0
         self.reset_buf[reset_env_ids] = 0
         self.tick[reset_env_ids] = 0
-        
+        self.sensor_model.reset(reset_env_ids)
+        self.foot_reference.mark_reset(reset_env_ids)
+        self.count = self.count + 1
+
     
     def pre_physics_step(self, actions):
         self.actions = actions[:]
 
-        roll = self.obs_buf[:, 3]
-        pitch = self.obs_buf[:, 4]
+        if self.sensor_model.enabled:
+            # Evaluation with a sensor model: the PD layer must read the same
+            # measurement the policy reads, otherwise the two are compared under
+            # different information conditions.
+            roll, pitch = self.sensor_model.sensed_attitude(self.obs_buf)
+        else:
+            # Base posture is computed directly from the current root state rather than
+            # read out of obs_buf, since obs_buf's layout (and thus the index of roll/pitch)
+            # depends on fullStateObservation and was previously wrong under the restricted
+            # layout (indices 3/4 held angular velocity x/y, not roll/pitch).
+            self.gym.refresh_actor_root_state_tensor(self.sim)
+            _quat = self.root_tensor[self.robinion2s_indexes, 3:7]
+            _r, _p, _ = get_euler_xyz(_quat)
+            roll = torch.where(_r > np.pi, _r - 2.0 * np.pi, _r)
+            pitch = torch.where(_p > np.pi, _p - 2.0 * np.pi, _p)
 
         p_gain_roll = unscale_transform(actions[:, 0], self.p_gain_roll_lower, self.p_gain_roll_upper)
         d_gain_roll = unscale_transform(actions[:, 1], self.d_gain_roll_lower, self.d_gain_roll_upper)
         p_gain_pitch = unscale_transform(actions[:, 2], self.p_gain_pitch_lower, self.p_gain_pitch_upper)
         d_gain_pitch = unscale_transform(actions[:, 3], self.d_gain_pitch_lower, self.d_gain_pitch_upper)
-
         weights = unscale_transform(actions[:, 4:10], self.weights_lower, self.weights_upper)
         lpf_alpha = unscale_transform(actions[:, 10:12], self.lpf_alpha_lower, self.lpf_alpha_upper)
-        
+
         left_leg, right_leg, left_arm, right_arm = self.control_balance_board_with_pid(
             -roll[:],
             -pitch[:],
@@ -426,7 +471,7 @@ class BalanceBoardPID(VecTask):
             lpf_alpha,
             self.all_env_indexes
         )
-        
+
         self._send_dof_targets(left_leg, right_leg, left_arm, right_arm)
 
     
@@ -495,7 +540,11 @@ class BalanceBoardPID(VecTask):
         self.gym.refresh_dof_state_tensor(self.sim)
         self.gym.refresh_rigid_body_state_tensor(self.sim)       
 
-        self.obs_buf[:] = compute_observations(
+        self.foot_reference.maybe_capture(
+            self.rigid_body_state, self.progress_buf,
+            self.l_foot_init_position, self.r_foot_init_position)
+
+        self.obs_buf[:] = self.sensor_model.apply(compute_observations(
             self.root_tensor, 
             self.dof_pos, 
             self.dof_vel, 
@@ -505,27 +554,9 @@ class BalanceBoardPID(VecTask):
             self.basis_x_vec,
             self.basis_y_vec,
             self.basis_z_vec,
-            self.tick
-        )
-
-    def quat_from_euler_deg(self, roll_deg=0.0, pitch_deg=0.0, yaw_deg=0.0):        
-        roll = math.radians(roll_deg)
-        pitch = math.radians(pitch_deg)
-        yaw = math.radians(yaw_deg)
-
-        cy = math.cos(yaw * 0.5)
-        sy = math.sin(yaw * 0.5)
-        cp = math.cos(pitch * 0.5)
-        sp = math.sin(pitch * 0.5)
-        cr = math.cos(roll * 0.5)
-        sr = math.sin(roll * 0.5)
-
-        w = cr * cp * cy + sr * sp * sy
-        x = sr * cp * cy - cr * sp * sy
-        y = cr * sp * cy + sr * cp * sy
-        z = cr * cp * sy - sr * sp * cy
-
-        return x, y, z, w
+            self.tick,
+            self._full_state
+        ), self.basis_z_vec)
 
 
 #####################################################################
@@ -551,7 +582,7 @@ def compute_reward(
     reward_weight: float,
     board_reset_angle: int
 ):
-    max_imu_angle = math.radians(25)
+    max_imu_angle = math.radians(10)
     max_board_angle = math.radians(board_reset_angle)
     max_torso_position = 0.20
     max_foot_position = 0.30
@@ -605,9 +636,10 @@ def compute_reward(
     reset_buf = torch.where(curr_tick >= max_touch_ground_time - 1, torch.ones_like(reset_buf), reset_buf)
     reset_buf = torch.where(robinion2s_torso_position > max_torso_position, torch.ones_like(reset_buf), reset_buf)
     reset_buf = torch.where(l_foot_dist > max_foot_position, torch.ones_like(reset_buf), reset_buf)
+    reset_buf = torch.where(r_foot_dist > max_foot_position, torch.ones_like(reset_buf), reset_buf)
     reward = torch.where(reset_buf == 1, -1.0, reward)
-    # reset_buf = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), reset_buf)
-    
+    reset_buf = torch.where(progress_buf >= max_episode_length - 1, torch.ones_like(reset_buf), reset_buf)
+
     return reward, reset_buf, curr_tick
 
 
@@ -622,9 +654,10 @@ def compute_observations(
     basis_x_vec: torch.Tensor,
     basis_y_vec: torch.Tensor,
     basis_z_vec: torch.Tensor,
-    tick: torch.Tensor
+    tick: torch.Tensor,
+    full_state: bool
 ):
-    
+
     robinion2s_position = root_tensor[robinion2s_ids, :3]
     robinion2s_orientation = root_tensor[robinion2s_ids, 3:7]
     robinion2s_velocity = root_tensor[robinion2s_ids, 7:10]
@@ -649,25 +682,26 @@ def compute_observations(
     robinion2s_up_vec = get_basis_vector(robinion2s_orientation, basis_z_vec)
     board_up_vec = get_basis_vector(board_orientation, basis_z_vec)
 
-    obs = torch.cat(
-        [
-            # robinion2s_position,
-            robinion2s_roll.unsqueeze(1),
-            robinion2s_pitch.unsqueeze(1),
-            robinion2s_yaw.unsqueeze(1),
-            # robinion2s_velocity,
-            robinion2s_ang_velocity,
-            robinion2s_up_vec,
-            dof_pos_tensor,
-            # dof_vel_tensor,
-            # board_position,
-            # board_roll.unsqueeze(1),
-            # board_pitch.unsqueeze(1),
-            # board_up_vec, 
-            # tick.unsqueeze(1),
-            actions
-        ],
-        dim=1,
-    )
+    obs_list: List[torch.Tensor] = []
+    if full_state:
+        obs_list.append(robinion2s_position)
+    obs_list.append(robinion2s_roll.unsqueeze(1))
+    obs_list.append(robinion2s_pitch.unsqueeze(1))
+    obs_list.append(robinion2s_yaw.unsqueeze(1))
+    if full_state:
+        obs_list.append(robinion2s_velocity)
+    obs_list.append(robinion2s_ang_velocity)
+    obs_list.append(robinion2s_up_vec)
+    obs_list.append(dof_pos_tensor)
+    if full_state:
+        obs_list.append(dof_vel_tensor)
+        obs_list.append(board_position)
+        obs_list.append(board_roll.unsqueeze(1))
+        obs_list.append(board_pitch.unsqueeze(1))
+        obs_list.append(board_up_vec)
+        obs_list.append(tick.unsqueeze(1).to(dof_pos_tensor.dtype))
+    obs_list.append(actions)
+
+    obs = torch.cat(obs_list, dim=1)
 
     return obs
