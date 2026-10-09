@@ -4,12 +4,6 @@ Isaac Gym-based reinforcement learning environments for humanoid balance control
 
 This repository provides custom IsaacGymEnvs tasks for training and evaluating a humanoid robot balance controller using multiple action representations, including PD-based control, inverse-kinematics-based control, and direct joint-space control.
 
-## Demo Video
-
-[![Balance Board Demo](https://img.youtube.com/vi/-xCmdSmCYeY/0.jpg)](https://youtu.be/-xCmdSmCYeY)
-
-Direct link: [Watch the demo on YouTube](https://youtu.be/-xCmdSmCYeY)
-
 ## Overview
 
 The goal of this project is to train a humanoid robot to maintain balance on an unstable balance board in simulation. The environment is implemented using NVIDIA Isaac Gym and IsaacGymEnvs.
@@ -20,7 +14,7 @@ The repository includes:
 - Custom IsaacGymEnvs task files
 - PPO training configurations
 - PID and low-pass filter utilities
-- A baseline PD control
+- The fixed-gain PD reference used for comparison
 
 ## Main Features
 
@@ -32,7 +26,8 @@ The repository includes:
   - `BalanceBoardJoint`
 - PPO training configuration for each task
 - GPU-based parallel simulation through Isaac Gym
-- Baseline PD controller for comparison
+- Fixed-gain PD reference, obtained from the time-averaged gains commanded by the trained
+  PD-assisted IK policies (`scripts/extract_pd_gains.py`)
 
 ## Task Variants
 
@@ -88,9 +83,20 @@ python scripts/eval_harness.py --task BalanceBoardJoint --obs-mode full \
 
 ### Figures
 
-`plot_sensitivity.py`, `plot_convergence.py`, `plot_torque_trace.py`,
-`plot_action_representations.py` and `plot_pd_random_search.py` regenerate the figures from
-the summary files in `results/`.
+`plot_sensitivity.py`, `plot_convergence.py`, `plot_torque_trace.py` and
+`plot_action_representations.py` regenerate the figures from the summary files in `results/`.
+
+### Trained checkpoints
+
+The checkpoints are not tracked here. They are available at:
+
+<!-- TODO: paste the Google Drive share link here before release -->
+**Google Drive:** _link to be added_
+
+Unpack them under `runs/` using the run names the scripts expect,
+`<Task>_<obs-mode>_3k_seed<N>_<timestamp>/nn/`, where `<Task>` is `PID`, `IK` or `Joint` and
+`<obs-mode>` is `full` or `restricted`. Training the 3000-iteration matrix from scratch
+instead takes roughly 16 h on a single RTX 2070 (18 runs).
 
 ### Notes
 

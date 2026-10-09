@@ -202,10 +202,11 @@ class BalanceBoardIK(VecTask):
             self.gym.set_actor_dof_properties(env_ptr, robinion2s_handle, props)
             self.num_dofs = self.gym.get_actor_dof_count(env_ptr, robinion2s_handle)
 
-            # Measurement only, enabled solely for the coordination analysis: this reports
-            # the torque the position servo actually applied, which is what a postural
-            # strategy must be defined on. Joint angle says how far a joint moved, not how
-            # much it contributed to keeping the robot up.
+            # Measurement only, enabled solely for the coordination analysis. What this
+            # sensor includes -- actuation alone, or actuation together with constraint and
+            # contact terms -- was not verified, so the analysis reports it alongside an
+            # explicit evaluation of the drive law and draws no conclusion that depends on
+            # which of the two is the joint's physical contribution.
             if self.cfg.get("eval", {}).get("logJointTorque", False):
                 self.gym.enable_actor_dof_force_sensors(env_ptr, robinion2s_handle)
 
