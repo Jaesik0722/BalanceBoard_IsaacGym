@@ -92,15 +92,12 @@ The checkpoints are not tracked here. They are available on Google Drive:
 
 https://drive.google.com/drive/folders/1knRNT0W7uzJ45eYwY0E5CAe41VPK0JHg?usp=sharing
 
-The archive holds the checkpoints the evaluation reads, with the `config.yaml` of each run:
-the 3000-iteration matrix at iterations 2600, 2800 and 3000 (three action representations,
-two observation conditions, three seeds) and the 1000-iteration budget comparison at
-iterations 600, 800 and 1000 (five seeds). Unpack it from the `isaacgymenvs` directory so the
-runs land under `runs/`, which is the layout the scripts expect:
-
-```bash
-tar xzf runs_paper.tgz
-```
+The folder holds the `runs/` directory the scripts expect, with the checkpoints the evaluation
+reads and the `config.yaml` of each run: the 3000-iteration matrix at iterations 2600, 2800
+and 3000 (three action representations, two observation conditions, three seeds) and the
+1000-iteration budget comparison at iterations 600, 800 and 1000 (five seeds). Download
+`runs/` and place it directly in the `isaacgymenvs` directory, alongside `scripts/` and
+`tasks/`, so that paths read `runs/<Task>_<obs-mode>_3k_seed<N>_<timestamp>/nn/*.pth`.
 
 Training the 3000-iteration matrix from scratch instead takes roughly 16 h on a single
 RTX 2070 (18 runs).
