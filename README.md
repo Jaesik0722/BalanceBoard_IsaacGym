@@ -88,15 +88,22 @@ python scripts/eval_harness.py --task BalanceBoardJoint --obs-mode full \
 
 ### Trained checkpoints
 
-The checkpoints are not tracked here. They are available at:
+The checkpoints are not tracked here. They are available on Google Drive:
 
-<!-- TODO: paste the Google Drive share link here before release -->
-**Google Drive:** _link to be added_
+https://drive.google.com/drive/folders/1knRNT0W7uzJ45eYwY0E5CAe41VPK0JHg?usp=sharing
 
-Unpack them under `runs/` using the run names the scripts expect,
-`<Task>_<obs-mode>_3k_seed<N>_<timestamp>/nn/`, where `<Task>` is `PID`, `IK` or `Joint` and
-`<obs-mode>` is `full` or `restricted`. Training the 3000-iteration matrix from scratch
-instead takes roughly 16 h on a single RTX 2070 (18 runs).
+The archive holds the checkpoints the evaluation reads, with the `config.yaml` of each run:
+the 3000-iteration matrix at iterations 2600, 2800 and 3000 (three action representations,
+two observation conditions, three seeds) and the 1000-iteration budget comparison at
+iterations 600, 800 and 1000 (five seeds). Unpack it from the `isaacgymenvs` directory so the
+runs land under `runs/`, which is the layout the scripts expect:
+
+```bash
+tar xzf runs_paper.tgz
+```
+
+Training the 3000-iteration matrix from scratch instead takes roughly 16 h on a single
+RTX 2070 (18 runs).
 
 ### Notes
 
